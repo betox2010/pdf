@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flipbook</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1c1c1e; color: #fff;
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  #wrap { position: absolute; top: 0; left: 0; right: 0; bottom: 44px; }
+  #book { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; background: #111;
+         display: flex; align-items: center; justify-content: center; gap: 10px; }
+  #bar button { background: #2c2c2e; color: #fff; border: 0; border-radius: 6px;
+                padding: 6px 14px; font-size: 15px; cursor: pointer; }
+  #bar button:hover { background: #3a3a3c; }
+  #counter { min-width: 70px; text-align: center; font-size: 14px; opacity: .85; }
+  #loading { position: absolute; inset: 0; display: flex; flex-direction: column;
+             align-items: center; justify-content: center; gap: 12px; background: #1c1c1e; z-index: 5; }
+  #progress { width: 220px; height: 6px; background: #3a3a3c; border-radius: 3px; overflow: hidden; }
+  #progress div { height: 100%; width: 0; background: #0a84ff; transition: width .15s; }
+  #error { display: none; padding: 20px; text-align: center; max-width: 480px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div id="msg">Cargando documento…</div>
+  <div id="progress"><div id="progress-bar"></div></div>
+  <div id="error"></div>
+</div>
+
+<div id="wrap"><div id="book"></div></div>
+
+<div id="bar">
+  <button id="prev" title="Anterior">&#9664;</button>
+  <span id="counter">–</span>
+  <button id="next" title="Siguiente">&#9654;</button>
+  <button id="full" title="Pantalla completa">&#x26F6;</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+<script>
+  // ====== CONFIGURACIÓN ======
+  // Nombre del PDF (debe estar en la misma carpeta que este index.html).
+  // También puedes usar ?pdf=otro.pdf en la URL.
+  const PDF_URL = new URLSearchParams(location.search).get('pdf') || 'documento.pdf';
+  const JPEG_QUALITY = 0.85;   // 0.5 = más ligero, 0.95 = más calidad
+  // ===========================
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const $ = (id) => document.getElementById(id);
+
+  function showError(text) {
+    $('msg').style.display = 'none';
+    $('progress').style.display = 'none';
+    $('error').style.display = 'block';
+    $('error').textContent = text;
+  }
+
+  async function init() {
+    const pdf = await pdfjsLib.getDocument(PDF_URL).promise;
+    const total = pdf.numPages;
+
+    const first = await pdf.getPage(1);
+    const base = first.getViewport({ scale: 1 });
+    const landscape = base.width > base.height;
+    const targetWidth = landscape ? 1400 : 1000;
+
+    const images = [];
+    for (let i = 1; i <= total; i++) {
+      const page = await pdf.getPage(i);
+      const b = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: targetWidth / b.width });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(vp.width);
+      canvas.height = Math.floor(vp.height);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+      images.push(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
+      canvas.width = canvas.height = 0;
+      $('progress-bar').style.width = Math.round((i / total) * 100) + '%';
+      $('msg').textContent = 'Preparando páginas… ' + i + ' / ' + total;
+    }
+
+    const pageFlip = new St.PageFlip($('book'), {
+      width: Math.round(base.width),
+      height: Math.round(base.height),
+      size: 'stretch',
+      // Páginas horizontales (tipo diapositiva): fuerza vista de una página por vez.
+      minWidth: landscape ? 100000 : 315,
+      maxWidth: 4000,
+      minHeight: 200,
+      maxHeight: 4000,
+      showCover: !landscape,
+      usePortrait: true,
+      drawShadow: true,
+      maxShadowOpacity: 0.4,
+      flippingTime: 700,
+      mobileScrollSupport: false
+    });
+
+    pageFlip.loadFromImages(images);
+
+    const updateCounter = (idx) => { $('counter').textContent = (idx + 1) + ' / ' + total; };
+    updateCounter(0);
+    pageFlip.on('flip', (e) => updateCounter(e.data));
+
+    $('prev').onclick = () => pageFlip.flipPrev();
+    $('next').onclick = () => pageFlip.flipNext();
+    $('full').onclick = () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+    };
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') pageFlip.flipPrev();
+      if (e.key === 'ArrowRight') pageFlip.flipNext();
+    });
+
+    $('loading').style.display = 'none';
+  }
+
+  init().catch((err) => {
+    console.error(err);
+    showError('No se pudo cargar "' + PDF_URL + '". Revisa que el PDF esté en la misma carpeta que index.html ' +
+              'y que abras la página desde una URL (GitHub Pages o un servidor local), no con doble clic.');
+  });
+</script>
+</body>
+</html>
